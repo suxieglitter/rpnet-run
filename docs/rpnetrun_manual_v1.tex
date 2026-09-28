@@ -1,0 +1,322 @@
+% rpnet-run v0.1.0 (github wrapper of jongwon-han/RPNet v0.1.0) + SKHASH 1.1.5.
+% Operations manual for network operators who already hold P picks.
+% Every command and file format verified on WSL2 Ubuntu (conda Python 3.9,
+% TensorFlow 2.7.0, CPU route, 5-degree SKHASH grid).
+\documentclass[aspectratio=169,12pt]{beamer}
+\geometry{paperwidth=32cm,paperheight=18cm}
+\usepackage[UTF8,fontset=fandol]{ctex}
+\usepackage{fontspec,array,booktabs,tabularx,fancyvrb}
+\setmainfont{texgyreheros-regular.otf}[BoldFont=texgyreheros-bold.otf]
+\setsansfont{texgyreheros-regular.otf}[BoldFont=texgyreheros-bold.otf]
+\setmonofont{lmmono10-regular.otf}[BoldFont=lmmono10-regular.otf]
+\usefonttheme{professionalfonts}
+\definecolor{Ink}{HTML}{202020}
+\definecolor{Accent}{HTML}{176A79}
+\definecolor{Muted}{HTML}{505050}
+\setbeamercolor{normal text}{fg=Ink,bg=white}
+\setbeamercolor{frametitle}{fg=Ink}
+\setbeamercolor{structure}{fg=Accent}
+\setbeamercolor{alerted text}{fg=Accent}
+\setbeamerfont{normal text}{size=\fontsize{24}{32}\selectfont}
+\setbeamerfont{frametitle}{size=\fontsize{34}{42}\selectfont,series=\bfseries}
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{headline}{}
+\setbeamertemplate{footline}{\hfill{\color{Muted}\fontsize{18}{20}\selectfont\insertframenumber}\hspace{1.1cm}\vspace{0.45cm}}
+\setbeamertemplate{frametitle}{\vspace{0.55cm}\insertframetitle\par\vspace{0.35cm}}
+\setbeamersize{text margin left=1.25cm,text margin right=1.25cm}
+\setbeameroption{hide notes}
+\hypersetup{pdftitle={rpnet-run 操作手册：用 P 震相批量判定初动极性},pdfsubject={RPNet polarity from operator P picks, SKHASH focal mechanisms}}
+\AtBeginDocument{\fontsize{24}{32}\selectfont}
+\newcommand{\code}[1]{{\ttfamily\fontsize{21}{28}\selectfont\detokenize{#1}}}
+\newcommand{\cmd}[1]{\par{\color{Accent}\ttfamily\fontsize{23}{31}\selectfont\detokenize{#1}}\par}
+\newcommand{\inlinecmd}[1]{{\color{Accent}\ttfamily\fontsize{21}{28}\selectfont\detokenize{#1}}}
+\newcommand{\gap}{\par\vspace{0.30cm}}
+\newcommand{\lineitem}[2]{\textbf{#1}\quad #2\par\vspace{0.20cm}}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\renewcommand{\tabularxcolumn}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcommand{\dir}[1]{\par{\color{Accent}\ttfamily\fontsize{21}{29}\selectfont\detokenize{#1}}\par}
+\DefineVerbatimEnvironment{Code}{Verbatim}{fontsize=\fontsize{21}{28}\selectfont}
+\DefineVerbatimEnvironment{Shell}{Verbatim}{fontsize=\fontsize{21}{28}\selectfont,formatcom=\color{Accent}}
+
+\begin{document}
+
+\begin{frame}[t]{rpnet-run：这是什么东西}
+  \lineitem{干什么}{把你们已有的 P 震相报告，批量变成每个台站的 P 波初动极性（向上 U、向下 D、不确定 K）。}
+  \gap
+  \lineitem{再往前一步}{极性可直接交给 SKHASH，自动得到每个地震的震源机制（走向、倾角、滑动角）。}
+  \gap
+  \lineitem{怎么用}{一条命令 \code{rpnet-run} 加参数，不改脚本、不改配置文件。}
+  \gap
+  \lineitem{要准备的}{事件目录＋P 震相＋台站表＋波形，都是台网日常就有的东西。}
+  \gap
+  \lineitem{得到的}{每台极性表 \code{pol_result.csv}，以及可直接交给 SKHASH 的输入文件和机制解。}
+  \note{rpnet-run wraps the RPNet deep-learning model (Han et al., 2025, SRL): it cuts a window around each P arrival on the vertical channel and classifies first motion. All commands and formats in this manual were verified end-to-end on WSL2 Ubuntu, CPU route.}
+\end{frame}
+
+\begin{frame}[t]{准备四样东西}
+  \begin{tabularx}{\linewidth}{@{}L{5.0cm}XX@{}}
+    \textbf{文件} & \textbf{就是台网日常的什么} & \textbf{格式} \\[0.22cm]
+    事件目录 CSV & 地震目录导出 & 逐事件一行：时刻、位置、深度 \\[0.22cm]
+    震相表 CSV & 震相报告的 P 部分 & 逐台一行：事件号、台站、P 到时 \\[0.22cm]
+    台站表 CSV & 台站参数表 & 逐台一行：台站、经纬度、高程 \\[0.22cm]
+    波形目录 & 事件波形 & 每事件一子目录，垂直分量 \\
+  \end{tabularx}
+  \gap
+  \lineitem{S 到时}{不需要，只有 P 就能跑；缺的 S 由程序按速度模型自动补算。}
+  \gap
+  \lineitem{极性标注}{不需要，这正是本工具要算的东西。}
+  \gap
+  列名不同不用改文件，运行时用参数指认即可（后面逐页给出格式）。
+  \note{Design decision: operators hold P picks from routine phase picking; the tool therefore accepts a P-only phase table (no stime column). Verified: P-only catalog with --no-taup and with TauP both run end-to-end; the TauP route is identical to the full stime variant.}
+\end{frame}
+
+\begin{frame}[t,fragile]{运行环境（装一次）}
+  需要 Linux 或 macOS＋Miniconda/Anaconda。逐行执行：
+  \begin{Shell}
+conda create -n rpnet python=3.9 -y
+conda activate rpnet
+pip install rpnet
+pip install skhash
+pip install /path/to/rpnet-run
+rpnet-run --version
+  \end{Shell}
+  \gap
+  \code{pip install rpnet} 会装齐模型依赖（TensorFlow 2.7 等，下载约 0.5 GB）。\par
+  之后每次使用前 \code{conda activate rpnet} 即可。
+  \gap
+  Windows 未验证；建议在 Linux 服务器或 WSL2 上部署。默认 CPU 运行，\par
+  示例规模（百至千条震相）几十秒到几分钟。
+  \note{Verified installation order and versions: rpnet 0.1.0 (TensorFlow 2.7.0, numpy 1.19.5, obspy 1.3.1), SKHASH 1.1.5 in the same env, then the local rpnet-run wheel/editable install. The rpnet-run entry point appears in the env bin.}
+\end{frame}
+
+\begin{frame}[t,fragile]{输入一：事件目录 CSV}
+  每个事件一行。必需列：发震时刻、事件号、纬度、经度、深度；震级列可缺（缺时按 0 填写）。
+  \begin{Code}
+utc,event_id,lat,lon,dep,mag
+2024-06-11T23:26:49.83Z,E2024061101,35.6989,126.7222,10.2,4.8
+2024-06-12T04:55:43.04Z,E2024061202,35.7006,126.7248,9.2,3.1
+  \end{Code}
+  \gap
+  \begin{tabularx}{\linewidth}{@{}L{6.8cm}X@{}}
+    发震时刻 & ISO 格式（上例）；整张表必须同一时间标准 \\[0.16cm]
+    event\_id & 你们的地震编号，只含字母数字与短横线；同时用作波形子目录名 \\[0.16cm]
+    lat / lon / dep & 十进制度 / 公里；dep 取正深度 \\[0.16cm]
+    mag & 可选；缺列时程序自动补 0 并提示 \\
+  \end{tabularx}
+  \gap
+  列名不同就用 \code{--time-col}、\code{--id-col} 指认，不用改表。
+  \note{Catalog validation in rpnet\_run/pipeline.py: requires time\_col, id\_col, lat, lon, dep; mag optional (filled 0.0 with a notice). Timestamps are parsed as text into UTCDateTime without timezone conversion, so one consistent standard across catalog and phase tables is mandatory.}
+\end{frame}
+
+\begin{frame}[t,fragile]{输入二：震相表 CSV（只需要 P）}
+  每条 P 到时一行。必需列：事件号、台站、P 到时。S 到时列可有可无。
+  \begin{Code}
+event_id,sta,ptime
+E2024061101,YCH,2024-06-11T23:26:53.60Z
+E2024061101,ZHT,2024-06-11T23:26:55.22Z
+E2024061101,QLS,2024-06-11T23:26:56.08Z
+  \end{Code}
+  \gap
+  \begin{tabularx}{\linewidth}{@{}L{6.8cm}X@{}}
+    ptime & P 到时，与事件目录同一时间标准；个别行缺 P 就整行删掉 \\[0.16cm]
+    stime & 可选；没有这一列也能跑，需要 S 时程序按 TauP 补算 \\[0.16cm]
+    台站 & 与台站表、波形文件名里的台站代码一致（区分大小写） \\[0.16cm]
+    事件号 & 与事件目录里的 event\_id 完全一致 \\
+  \end{tabularx}
+  \gap
+  同一台站同一事件出现多次时，只保留一条（自动去重）。
+  \note{Verified with a P-only Kumamoto table (columns event\_id, data\_id, sta, ptime only): --no-taup route and default TauP route both complete; the TauP route result is identical (100/100 polarities) to the variant carrying an stime column. Duplicate (event, station) rows are dropped before SKHASH writing.}
+\end{frame}
+
+\begin{frame}[t,fragile]{输入三：台站表 CSV}
+  每个台站一行。必需列：台站、纬度、经度、高程（米）；台网、通道列可选。
+  \begin{Code}
+sta,lat,lon,elv,net,chan
+YCH,36.8876,120.6822,15.2,SD,HHZ
+ZHT,36.7524,120.9375,88.0,SD,BHZ
+QLS,36.1137,120.4316,22.5,SD,HHZ
+  \end{Code}
+  \gap
+  \begin{tabularx}{\linewidth}{@{}L{6.8cm}X@{}}
+    sta & 建议不超过 4 个字符；超长时自动改名 S001…并附 \code{sta_map.csv} 对照 \\[0.16cm]
+    elv & 海拔，单位米 \\[0.16cm]
+    net / chan & 可选；缺省时分别填 XX、HHZ \\[0.16cm]
+    台站集合 & 至少覆盖震相表里出现过的台站；震相表里多余的台站会被丢弃并提示 \\
+  \end{tabularx}
+  \note{Station table handling verified against both examples: Hi-net five/six-character names (e.g. N.TYNH) trigger the automatic S001 renaming with sta_map.csv; short-code networks keep original names. net/chan missing columns or empty cells are filled (XX / HHZ, U mapped to HHZ).}
+\end{frame}
+
+\begin{frame}[t,fragile]{输入四：波形目录}
+  按事件分目录、按台站分文件，放在同一个根目录下：
+  \dir{waveform/}
+  \dir{  E2024061101/    YCH.SAC  ZHT.SAC  QLS.SAC  ...}
+  \dir{  E2024061202/    YCH.SAC  ZHT.SAC  ...}
+  \gap
+  \begin{tabularx}{\linewidth}{@{}L{6.2cm}X@{}}
+    文件名 & \code{台站.任意后缀}，如 \code{YCH.SAC}、\code{YCH.mseed}；一个文件多道也可以 \\[0.16cm]
+    通道 & 程序自动挑垂直道：优先 \code{*Z}，没有再找 \code{*U} \\[0.16cm]
+    采样率 & 任意；非 100 Hz 自动插值到 100 Hz。建议用 100 Hz 及以上：\par 实测 10 Hz 数据准确率从 96.7\% 降到 80.0\%，且错得很有底气 \\[0.16cm]
+    窗长 & 每道至少覆盖 P 到时前后各 2.5 秒 \\[0.16cm]
+    事件目录名 & 与震相表、事件目录里的 event\_id 一致 \\
+  \end{tabularx}
+  \note{Channel selection is upstream wf2matrix behavior (select *Z, fallback *U, interpolate to 100 Hz, highpass 1 Hz, trim ptime +/- 2.5 s). The 10 Hz accuracy drop (96.7 vs 80.0 percent on the Kumamoto labeled subset) was measured in this workspace by downsampling and rerunning.}
+\end{frame}
+
+\begin{frame}[t]{到时从哪来：三种模式}
+  \begin{tabularx}{\linewidth}{@{}L{6.8cm}L{9.2cm}X@{}}
+    \textbf{模式} & \textbf{参数} & \textbf{含义} \\[0.14cm]
+    用你们的 P 拾取 & \code{--no-taup} & 直接用震相表的 ptime 切窗 \\[0.14cm]
+    全部用理论到时 & 默认 & 按事件位置算理论 P、S；原始拾取存 \code{ptime0} 列 \\[0.14cm]
+    混合 & \code{--keep-initial-phase} & 有拾取用拾取，缺的用理论到时补 \\
+  \end{tabularx}
+  \gap
+  \lineitem{推荐}{有自己的 P 拾取就用 \code{--no-taup}；拾取覆盖不全时用默认或混合模式，还能靠理论到时把没拾取的台站用起来（\code{--add-sta}）。}
+  \gap
+  \lineitem{实测}{同一批数据，两条路线极性一致率 94\%；对人工极性 95.0\%（自有拾取）对 96.7\%（理论到时）。}
+  \note{Verified all three routes on the same Kumamoto set: --no-taup 100 rows (95.0 percent agreement with JMA manual polarity, n=60), TauP default 96.7 percent, 94 percent mutual agreement. add-sta requires TauP and the CLI rejects the invalid combination explicitly.}
+\end{frame}
+
+\begin{frame}[t]{时间标准：最容易踩的坑}
+  \lineitem{规则只有一条}{事件目录和震相表必须用同一时间标准，表内不许混用。}
+  \gap
+  \lineitem{常见事故}{目录导出成北京时间、震相报告是 UTC（或反过来），程序照单全收不报错，\par 切窗位置整体差 8 小时，极性全部不可用。}
+  \gap
+  \lineitem{建议}{全部统一成 UTC 再交给程序（上两页示例均为 UTC）。}
+  \gap
+  \lineitem{自查办法}{抽一个事件，对比目录发震时刻与最近台的 ptime：到时应晚于发震、\par 且震中距越大晚得越多；差出好几小时就是标准错了。}
+  \gap
+  程序按文本解析时间串，不做任何时区换算，错标准不会报错，只能靠上面办法自查。
+  \note{Timestamps go straight into UTCDateTime without timezone logic; a consistent-but-shifted standard is undetectable by the tool. The sanity check (arrival later than origin, growing with distance) is the practical guard for operators.}
+\end{frame}
+
+\begin{frame}[t,fragile]{运行}
+  在数据所在目录执行（示例为自有 P 拾取、纯极性＋SKHASH 全流程）：
+  \begin{Shell}
+rpnet-run \
+  --waveform-dir waveform \
+  --catalog events.csv \
+  --phase picks.csv \
+  --stations stations.csv \
+  --model /abs/path/RPNet_v1.h5 \
+  --vmodel /abs/path/vel.csv \
+  --no-taup \
+  --out output01
+  \end{Shell}
+  屏幕依次显示进度：读表 $\to$ 切窗（显示窗数）$\to$ 预测（迭代进度条）$\to$ 阈值筛选 $\to$ SKHASH 输入。
+  \gap
+  只想要极性、暂时不跑机制：去掉 \code{--vmodel} 参数即可。
+  \note{Command shape mirrors the verified runs. Model path must be absolute (path guard forbids parent references). Omitting --vmodel skips SKHASH input generation and prints a notice.}
+\end{frame}
+
+\begin{frame}[t]{输出文件（output01/）}
+  \begin{tabularx}{\linewidth}{@{}L{9.6cm}X@{}}
+    \textbf{文件} & \textbf{内容} \\[0.24cm]
+    \code{pol_result.csv} & 每台一行，重点看三列（下页详说） \\[0.22cm]
+    \code{MSEED/}（按事件、台站分目录） & 实际送入模型的波形窗存档，可复查 \\[0.22cm]
+    \code{sta_map.csv} & 台站改名对照（仅当有超长台站名时出现） \\[0.24cm]
+    \code{hash2/IN/station.txt、phase.txt} & SKHASH 格式的台站与极性文件 \\[0.24cm]
+    \code{hash2/control_file.txt} & 现成的 SKHASH 控制文件 \\[0.24cm]
+    \code{hash2/OUT/out.csv} & SKHASH 跑完后出现在这里 \\
+  \end{tabularx}
+  \gap
+  极性判读：\code{predict} 列 U＝初动向上、D＝初动向下；不确定的按阈值已剔除。
+  \note{Output tree verified in the P-only and full runs. pol_result.csv keeps both prob and std plus (for the TauP route) ptime0/stime0 originals. The MSEED archive is written by upstream wf2matrix.}
+\end{frame}
+
+\begin{frame}[t]{质量控制：prob 与 std 怎么用}
+  模型对每个台站迭代预测 100 次，给出两个数：
+  \begin{tabularx}{\linewidth}{@{}L{6.4cm}X@{}}
+    \code{prob} & 平均置信度，越大越确定 \\[0.12cm]
+    \code{std} & 标准差，越大越摇摆 \\[0.12cm]
+    \code{std_threshold} & 默认 0.2：std 超过判为 K 并剔除 \\[0.12cm]
+    \code{mean_threshold} & 默认关；开启后 prob 低于该值也判 K \\[0.12cm]
+    \code{--keep-unknown} & 想保留 K 时加这个参数 \\
+  \end{tabularx}
+  \gap
+  \lineitem{建议}{先默认跑一遍，看 \code{pol_result.csv} 里 prob、std 的分布再收紧；要求高时用 \code{--mean-threshold 0.95} 一类设置。}
+  \gap
+  \lineitem{提醒}{高 prob 不等于一定对，低信噪比台站可能自信地错；抽查 \code{MSEED/} 波形窗最稳妥。}
+  \note{Threshold semantics follow upstream (std $>$ threshold $\to$ 'K'; mean threshold uses the corrected example2 logic). The 10 Hz experiment showed confident errors (prob near 1) surviving std filtering, hence the manual spot-check advice.}
+\end{frame}
+
+\begin{frame}[t,fragile]{接 SKHASH 出震源机制}
+  极性跑完后再执行一条命令：
+  \cmd{SKHASH output01/hash2/control_file.txt}
+  结果在 \code{output01/hash2/OUT/out.csv}：每事件一行，走向、倾角、滑动角、质量等级。
+  \gap
+  \begin{tabularx}{\linewidth}{@{}L{5.8cm}X@{}}
+    \code{--vmodel} & 本区一维速度模型：两列文本，深度 km、Vp km/s \\[0.12cm]
+    \code{--dang} & 网格角步长，默认 5 度（免编译，够用）；1 度需另编译 Fortran \\[0.12cm]
+    \code{--delmax} & 震中距上限，默认 120 km，按台网尺度调整 \\[0.12cm]
+    \code{--npolmin} & 少于 8 条极性的事件不出解（默认 8） \\
+  \end{tabularx}
+  \gap
+  速度模型示例（\code{vel.csv}）：
+  \begin{Code}
+0.0,5.8
+12.0,6.2
+25.0,6.8
+  \end{Code}
+  \note{SKHASH handoff verified on all four routes in this workspace. The control file is generated with dang=5, use\_fortran=False (pure-Python grid search, ~2.5 s for two events); the 1-degree Fortran route is documented in the companion deck. vmodel is a two-column depth/Vp text file, same as vz.iasp91 shipped with the upstream examples.}
+\end{frame}
+
+\begin{frame}[t]{路径与安全限制}
+  程序对输入输出路径有三条硬规矩，都是显式报错、不会误伤数据：
+  \begin{tabularx}{\linewidth}{@{}L{8.6cm}X@{}}
+    路径里不许出现 \code{..} & 如 \code{../model/RPNet_v1.h5} 会被拒；写绝对路径或普通相对路径 \\[0.20cm]
+    只在允许目录内读写 & 默认用户主目录；数据在别的盘时先执行 \par \code{export RPNET_RUN_ALLOWED_ROOT=/数据根目录} \\[0.20cm]
+    输出目录已存在会拒绝 & 换个新目录名，或加 \code{--overwrite} 明确表示清空重建 \\
+  \end{tabularx}
+  \gap
+  \lineitem{删除范围}{\code{--overwrite} 只清空输出目录本身；波形、震相、目录等输入文件一律只读。}
+  \note{Path policy enforced in rpnet\_run/paths.py: reject parent references, allowlist containment via RPNET_RUN_ALLOWED_ROOT (default \$HOME), explicit overwrite opt-in. Inputs are never modified; writes stay inside --out.}
+\end{frame}
+
+\begin{frame}[t]{常见问题速查}
+  \begin{tabularx}{\linewidth}{@{}L{9.6cm}X@{}}
+    \textbf{现象} & \textbf{先查什么} \\[0.14cm]
+    path is outside the allowed root & 设 \code{RPNET_RUN_ALLOWED_ROOT}，或把数据挪进主目录 \\[0.14cm]
+    path must not contain '..' & 把 \code{--model} 等写成绝对路径 \\[0.14cm]
+    no such file / no such directory & 路径拼错；事件号与波形子目录名不一致 \\[0.14cm]
+    极性条数比震相条数少 & 正常：波形缺失的台站被跳过；看屏幕上的窗数 \\[0.14cm]
+    极性几乎全 K 或全同号 & 时间标准是否统一；波形是否含垂直道 \\[0.14cm]
+    \code{--add-sta} 报错 & 该开关须配理论到时，别与 \code{--no-taup} 同用 \\[0.14cm]
+    SKHASH 结果空 & 极性数不够 \code{--npolmin}，或震中距超 \code{--delmax} \\
+  \end{tabularx}
+  \note{Messages match the actual guards in paths.py and pipeline.py. The window count printed before prediction is the ground truth for how many station-events survived waveform reading.}
+\end{frame}
+
+\begin{frame}[t,fragile]{先拿示例练手}
+  软件包自带两个小数据集，各两个地震，先用它们把流程走顺再上自己的数据。
+  \gap
+  \textbf{熊本示例（用震相表自带的 P 拾取，和你们的使用方式相同）}
+  \begin{Shell}
+cd RPNet/example
+rpnet-run --waveform-dir waveform --catalog Kumamoto_catalog.csv \
+  --phase Kumamoto_phase.csv --stations hinet_station.csv \
+  --model /abs/RPNet/model/RPNet_v1.h5 \
+  --vmodel /abs/RPNet/example/vz.iasp91 --no-taup --out out
+SKHASH out/hash2/control_file.txt
+  \end{Shell}
+  实测：121 条震相出 100 条极性，对人工极性 95.0\%；SKHASH 两事件机制解与高精度参考差 1--2 度。
+  \gap
+  跑通后，把四个输入换成你们的目录、震相、台站与波形即可，参数不用变。
+  \note{Verified on the fresh upstream checkout: the P-only --no-taup route yields 100 polarities (95.0 percent vs JMA manual polarity, n=60) and SKHASH solves both events (265.4/41.4/-88.2 and 22.6/69.7/-171.1, quality A).}
+\end{frame}
+
+\begin{frame}[t]{一张纸记住}
+  \begin{tabularx}{\linewidth}{@{}L{5.4cm}X@{}}
+    \textbf{要记的} & \textbf{内容} \\[0.22cm]
+    四个输入 & 事件目录、P 震相、台站表、波形（S 不需要） \\[0.22cm]
+    一条命令 & \code{rpnet-run ... --no-taup --out out} \\[0.22cm]
+    两条铁律 & 时间标准全表统一；事件号三处一致（目录、震相、波形目录名） \\[0.22cm]
+    到时来源 & 有 P 拾取用 \code{--no-taup}；要自动补台站用默认或混合模式 \\[0.22cm]
+    机制解 & \code{SKHASH out/hash2/control_file.txt} \\[0.22cm]
+    质量抓手 & \code{pol_result.csv} 的 prob/std；抽查 \code{MSEED/} 波形窗 \\
+  \end{tabularx}
+  \gap
+  详细的参数表与排错说明见随包 README；部署背景与上游原理见配套教程《RPNet 本地运行流程》。
+  \note{One-page recap of the manual. Companion materials: rpnet-run README.md and the earlier rpnet\_workflow\_v1.pdf deck (upstream-script route, 1-degree Fortran option).}
+\end{frame}
+
+\end{document}

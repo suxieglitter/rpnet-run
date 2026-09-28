@@ -1,0 +1,371 @@
+% RPNet v0.1.0 (github.com/jongwon-han/RPNet, 2025-05-15) + SKHASH 1.1.5.
+% Source-checked operational guide; installation and both packaged examples verified
+% end-to-end on WSL2 Ubuntu (conda Python 3.9, TensorFlow 2.7.0, CPU route).
+% Main line: SKHASH 5-degree grid with the built-in Python routine (no compiler needed).
+% The 1-degree Fortran route on the optional page was also verified.
+\documentclass[aspectratio=169,12pt]{beamer}
+\geometry{paperwidth=32cm,paperheight=18cm}
+\usepackage[UTF8,fontset=fandol]{ctex}
+\usepackage{fontspec,array,booktabs,tabularx,fancyvrb}
+\setmainfont{texgyreheros-regular.otf}[BoldFont=texgyreheros-bold.otf]
+\setsansfont{texgyreheros-regular.otf}[BoldFont=texgyreheros-bold.otf]
+\setmonofont{lmmono10-regular.otf}[BoldFont=lmmono10-regular.otf]
+\usefonttheme{professionalfonts}
+\definecolor{Ink}{HTML}{202020}
+\definecolor{Accent}{HTML}{176A79}
+\definecolor{Muted}{HTML}{505050}
+\setbeamercolor{normal text}{fg=Ink,bg=white}
+\setbeamercolor{frametitle}{fg=Ink}
+\setbeamercolor{structure}{fg=Accent}
+\setbeamercolor{alerted text}{fg=Accent}
+\setbeamerfont{normal text}{size=\fontsize{24}{32}\selectfont}
+\setbeamerfont{frametitle}{size=\fontsize{34}{42}\selectfont,series=\bfseries}
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{headline}{}
+\setbeamertemplate{footline}{\hfill{\color{Muted}\fontsize{18}{20}\selectfont\insertframenumber}\hspace{1.1cm}\vspace{0.45cm}}
+\setbeamertemplate{frametitle}{\vspace{0.55cm}\insertframetitle\par\vspace{0.35cm}}
+\setbeamersize{text margin left=1.25cm,text margin right=1.25cm}
+\setbeameroption{hide notes}
+\hypersetup{pdftitle={RPNet v0.1.0 本地运行流程：P 波极性与 SKHASH},pdfsubject={RPNet polarity prediction, SKHASH focal mechanisms, local deployment}}
+\AtBeginDocument{\fontsize{24}{32}\selectfont}
+\newcommand{\code}[1]{{\ttfamily\fontsize{21}{28}\selectfont\detokenize{#1}}}
+\newcommand{\cmd}[1]{\par{\color{Accent}\ttfamily\fontsize{23}{31}\selectfont\detokenize{#1}}\par}
+\newcommand{\inlinecmd}[1]{{\color{Accent}\ttfamily\fontsize{21}{28}\selectfont\detokenize{#1}}}
+\newcommand{\directory}[1]{\par{\color{Accent}\ttfamily\fontsize{21}{29}\selectfont\detokenize{#1}}\par\vspace{0.35cm}}
+\newcommand{\gap}{\par\vspace{0.30cm}}
+\newcommand{\lineitem}[2]{\textbf{#1}\quad #2\par\vspace{0.20cm}}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\renewcommand{\tabularxcolumn}[1]{>{\raggedright\arraybackslash}p{#1}}
+\DefineVerbatimEnvironment{Code}{Verbatim}{fontsize=\fontsize{21}{28}\selectfont}
+\DefineVerbatimEnvironment{Shell}{Verbatim}{fontsize=\fontsize{21}{28}\selectfont,formatcom=\color{Accent}}
+
+\begin{document}
+
+\begin{frame}[t]{RPNet 概述}
+  \lineitem{功能}{从 SAC / MSEED 波形自动判定 P 波初动极性：U（向上）、D（向下）、K（不确定）。}
+  \gap
+  \begin{tabularx}{\linewidth}{@{}L{5.2cm}XX@{}}
+    \textbf{环节} & \textbf{处理内容} & \textbf{输出} \\[0.22cm]
+    到时整理（可选） & TauP 理论到时替换或补齐 P/S & 统一到时表 \\[0.22cm]
+    极性预测 & 逐台迭代预测极性与置信度 & \code{pol_result.csv} \\[0.22cm]
+    结果筛选 & 不稳的判为 K 并剔除 & 筛后极性表 \\[0.22cm]
+    SKHASH 输入 & 生成 HASH 格式输入与控制文件 & hash2 或 hash3 目录 \\
+  \end{tabularx}
+  \gap
+  两级流程：RPNet 出极性，\href{https://code.usgs.gov/esc/SKHASH}{SKHASH}（Skoumal et al., 2024）反演震源机制。
+  \gap
+  本地运行版本：\href{https://github.com/jongwon-han/RPNet}{RPNet v0.1.0}（Han et al., 2025, SRL）。
+  \note{Sources: repository README, RELEASES.md (v0.1.0, 2025-05-15) and src/rpnet module docstrings. Class letters U/D/K from predict.py pred\_model mapping. Example data are bundled, so no waveform download is needed for the two examples.}
+\end{frame}
+
+\begin{frame}[t]{处理流程}
+  \begin{tabularx}{\linewidth}{@{}L{6.2cm}X@{}}
+    \textbf{模块} & \textbf{输入与输出} \\[0.30cm]
+    0. 数据准备 & 事件目录、震相、台站三个 CSV＋事件波形目录 \\[0.30cm]
+    1. 到时整理（可选） & TauP 理论到时；\code{add_sta} 给无拾取台站补到时 \\[0.30cm]
+    2. 极性预测 & 垂直分量切窗（P$\pm$2.5 s、高通 1 Hz、100 Hz）$\longrightarrow$ \code{RPNet_v1.h5} \\[0.30cm]
+    3. 筛选与输出 & 阈值筛选 $\longrightarrow$ \code{pol_result.csv} 与 SKHASH 输入文件 \\[0.30cm]
+    4. 震源机制 & SKHASH 网格搜索 $\longrightarrow$ 走向、倾角、滑动角 \\
+  \end{tabularx}
+  \gap
+  模型权重随仓库附带（\code{model/RPNet_v1.h5}，约 62 MB）；v0.1.0 没有训练接口，作者预告后续版本。
+  \gap
+  模块 1--3 由一个入口 \code{run_RPNet.py} 一次完成；模块 4 单独运行 SKHASH 命令。
+  \note{Sources: example/run\_RPNet.py execution order and src/rpnet/predict.py wf2matrix (read *Z fallback *U, interpolate to 100 Hz, highpass 1 Hz, trim ptime +/- 2.5 s, normalize, keep 500 samples). Model size from repo file listing. Training listed as upcoming in README.}
+\end{frame}
+
+\begin{frame}[t]{按目标选择流程}
+  \lineitem{只要极性}{跑 \code{run_RPNet.py}，取 \code{output01/pol_result.csv}，跳过 SKHASH。}
+  \gap
+  \lineitem{极性＋震源机制}{example 流程（本教程主线），再跑一步 SKHASH。}
+  \gap
+  \lineitem{极性＋S/P 振幅比}{example2 流程，\code{hash_version='hash3'}，需要三分量波形。}
+  \gap
+  \lineitem{训练本区模型}{v0.1.0 未提供；作者预告训练与微调模块。}
+  \gap
+  四个输入文件齐备即可开始。两个示例的事件、波形、台站表全部随仓库附带。
+  \note{Sources: README New/Upcoming Features and the two example directories. Both examples run offline once the conda environment is installed.}
+\end{frame}
+
+\begin{frame}[t]{程序目录}
+  \begin{tabularx}{\linewidth}{@{}L{5.4cm}X@{}}
+    \textbf{目录} & \textbf{用途} \\[0.28cm]
+    \code{example/} & 熊本地震两个事件（hash2，仅极性）＋输入与参考输出 \\[0.28cm]
+    \code{example2/} & 2024 Buan 两个事件（hash3，极性＋S/P 比）＋输入与参考输出 \\[0.28cm]
+    \code{model/} & \code{RPNet_v1.h5} 与 \code{mRPNet_v1.h5}（各约 62 MB，示例用前者） \\[0.28cm]
+    \code{src/rpnet/} & \code{predict.py}（到时、切窗、预测）与 \code{rpnet2skhash.py}（输出转换） \\[0.28cm]
+    \code{dist/} & \code{rpnet-0.1.0} 的 wheel 与源码包（离线安装用） \\
+  \end{tabularx}
+  \gap
+  两个示例目录各带 \code{run_RPNet.py}、\code{hyperparams.py}、\code{control_file0.txt}，\par
+  并附分步教程 \code{run_RPNet.ipynb}。
+  \note{Source: repository tree. mRPNet\_v1.h5 is not referenced by either example script. The wheel installs the same pinned dependencies as PyPI.}
+\end{frame}
+
+\begin{frame}[t,fragile]{源码与工作目录}
+  从 \href{https://github.com/jongwon-han/RPNet}{github.com/jongwon-han/RPNet} 克隆或下载源码包并解压。
+  \gap
+  保留原件，将程序目录复制为 \code{~/RPNet-work}，并在终端核对内容：
+  \begin{Shell}
+export RPNET_ROOT="$HOME/RPNet-work"
+cd "$RPNET_ROOT"
+ls README.md model example example2
+  \end{Shell}
+  \gap
+  示例中的模型路径写作 \code{../model/RPNet_v1.h5}，相对 example 目录——\par
+  在示例目录内运行就不用改脚本。
+  \gap
+  新终端需重新设置 \code{RPNET_ROOT}。
+  \note{Sources: example/hyperparams.py model path and run\_RPNet.py imports. GitHub clone may need a proxy on restricted networks. The copy keeps the cloned original untouched; run_RPNet.py wipes its own out\_dir on each run.}
+\end{frame}
+
+\begin{frame}[t,fragile]{运行环境：Conda}
+  安装 Miniconda 或 Anaconda 后，创建环境并安装：
+  \begin{Shell}
+conda create -n rpnet python=3.9 -y
+conda activate rpnet
+pip install rpnet
+pip install skhash
+python -c "import rpnet, SKHASH; print('import OK')"
+  \end{Shell}
+  \gap
+  \code{pip install rpnet} 按作者清单装齐：tensorflow 2.7.0、numpy 1.19.5、obspy 1.3.1、\par
+  pandas 1.4.4、keras-self-attention、protobuf 3.20.0 等，下载量约 0.5 GB。
+  \gap
+  \code{skhash}（1.1.5）依赖 numpy$<$2.0，与上面兼容，装进同一环境即可。
+  \gap
+  默认 CPU 运行（\code{gpu_num=""}）；示例数据小，作者注明 CPU 更快。\par
+  GPU 需为 TensorFlow 2.7 另配 CUDA 11.x 与 cuDNN 8.1，本教程未验证。
+  \note{Verified on WSL2 Ubuntu: conda create + pip install rpnet resolved exactly the pinned set (TensorFlow 2.7.0, numpy 1.19.5, scikit-learn 1.6.1, obspy 1.3.1, protobuf 3.20.0); imports of rpnet and SKHASH both succeed. PyPI reachable directly; use a mirror if slow. README recommends Python 3.9; the author developed against CUDA 11.1.74 for GPU.}
+\end{frame}
+
+\begin{frame}[t,fragile]{网格步长：本教程改用 5 度}
+  模板默认 \code{dang 1}（1 度网格）必须配编译好的 Fortran 例程：\par
+  纯 Python 回退要分配约 34 GiB 内存，且并行模式下报错被吞、\code{out.csv} 只剩表头。
+  \gap
+  本教程在 \code{control_file0.txt} 改两处，用 SKHASH 内置的 Python 例程，免编译（1 度路线见下一页）：
+  \begin{Code}
+$dang          # minimum grid spacing (degrees)
+5
+$use_fortran   # Fortran subroutine for fast grid search
+False
+  \end{Code}
+  \gap
+  实测（5 度、纯 Python）：example1 全程 2.5 秒、内存峰值约 1 GB；example2 约 24 秒。
+  代价：机制解与作者的 1 度结果相差约 1--5 度（见结果核对页）。
+  \note{Verified: dang=5 with use\_fortran=False runs the built-in Python grid search. Example1: total 2.5 s, peak RSS about 1.0 GB, both events solved. Example2 (hash3): 24 s. For reference, the 1-degree Fortran route needed 11 s / 225 s respectively, so the coarser Python grid is also faster. Template defaults are dang=1 and use\_fortran=True; the 34.3 GiB allocation error and the silent parallel failure were both observed at dang=1 without the Fortran module.}
+\end{frame}
+
+\begin{frame}[t,fragile]{可选：1 度网格与 Fortran 例程}
+  要完全复现作者设置（\code{dang 1}）按本页编译；5 度主线不需要本页。
+  \textbf{Ubuntu / WSL2：先装编译器，再进入 SKHASH 的 functions 目录}
+  \cmd{sudo apt-get install -y gfortran}
+  \directory{cd ~/anaconda3/envs/rpnet/lib/python3.9/site-packages/SKHASH/functions}
+  把 \code{gridsearch.f} 中 \code{ncoor=31032} 改为 \code{ncoor=4000000}（1 度网格需 3,745,620；5 度用原值即可），再编译：
+  \begin{Shell}
+SETUPTOOLS_USE_DISTUTILS=stdlib \
+python -m numpy.f2py -c gridsearch.f -m gridsearch
+  \end{Shell}
+  成功标志：生成 \code{gridsearch.cpython-39-*.so}、SKHASH 打印 \code{Fortran loaded}；\par
+  并把 \code{control_file0.txt} 的 \code{use_fortran} 改回 \code{True}。
+  \gap
+  需本环境的 Python 3.9＋numpy 1.19.5；更高版本 numpy.distutils 已不可用。
+  \note{Verified at dang=1: compilation succeeded with SETUPTOOLS\_USE\_DISTUTILS=stdlib; without it, ModuleNotFoundError: distutils.msvccompiler (setuptools shim). The unpatched ncoor=31032 fails with "the \# of rotations too big" at dang=1 (requirement computed with fun.dir\_cos\_setup). macOS: brew install gcc supplies gfortran. After the patch, both examples reproduce the author's shipped mechanisms exactly to 0.1 degree.}
+\end{frame}
+
+\begin{frame}[t]{输入数据：四个文件}
+  \begin{tabularx}{\linewidth}{@{}L{5.6cm}XX@{}}
+    \textbf{文件} & \textbf{示例} & \textbf{内容} \\[0.26cm]
+    事件目录 & \code{Kumamoto_catalog.csv} & \code{data_id}、\code{jst}（发震时刻）、\code{lat}、\code{lon}、\code{dep}、\code{mag} \\[0.26cm]
+    震相表 & \code{Kumamoto_phase.csv} & \code{event_id}、\code{data_id}、\code{sta}、\code{ptime}、\code{stime}、\code{pol} \\[0.26cm]
+    台站表 & \code{hinet_station.csv} & \code{net}、\code{sta}、\code{chan}、\code{lat}、\code{lon}、\code{elv} \\[0.26cm]
+    波形目录 & \code{waveform/<data_id>/<sta>.*} & 如 \code{AKAIKE.U.SAC}；垂直通道 *Z 优先，无则 *U \\
+  \end{tabularx}
+  \gap
+  列名可换：\code{ftime / fwfid / fptime / fstime} 在 \code{hyperparams.py} 里指向实际列名。
+  \gap
+  事件目录与震相的时间须同一时间标准（\code{jst} 只是列名，不做换算）；\par
+  非 100 Hz 的波形会自动插值到 100 Hz。
+  \note{Sources: example CSV headers and predict.py wf2matrix channel selection (v0.1.0 fix: *Z then *U) and interpolate(100). Timestamps are parsed by UTCDateTime without timezone conversion, so catalog and phase tables must share one convention.}
+\end{frame}
+
+\begin{frame}[t,fragile]{hyperparams.py：路径与字段（example）}
+  修改 \code{example/hyperparams.py} 开头的参数段：
+  \begin{Code}
+model='../model/RPNet_v1.h5'
+wf_dir='./waveform'
+event_catalog='./Kumamoto_catalog.csv'
+phase_metadata='./Kumamoto_phase.csv'
+sta_metadata='./hinet_station.csv'
+out_dir='./output01'
+ctrl0='./control_file0.txt'
+ftime='jst'; fwfid='data_id'; fptime='ptime'; fstime='stime'
+  \end{Code}
+  路径相对 example 目录；换自己数据时改这五个输入路径。
+  \gap
+  \code{ctrl0} 是 SKHASH 模板，运行前先把速度模型路径改成实际位置（见后页）。
+  \gap
+  example2 同名文件结构相同，默认值即其示例所需。
+  \note{Source: example/hyperparams.py. The four ftime/fwfid/fptime/fstime names are the only column-name bindings; both example hyperparams files were diffed (example2 differs in fwfid='pick', ftime='utc' and prediction thresholds).}
+\end{frame}
+
+\begin{frame}[t,fragile]{hyperparams.py：预测与筛选参数}
+  \begin{Code}
+cores=5; batch_size=2**13; iteration=100; gpu_num=""
+std_threshold=0.2; mean_threshold=0; rm_unknwon=True
+change2taup=True; add_sta=True; keep_initial_phase=False
+taup_model='iasp91'; hash_version='hash2'
+  \end{Code}
+  \begin{tabularx}{\linewidth}{@{}L{8.6cm}X@{}}
+    \code{iteration=100} & 迭代预测：\code{prob} 取均值、\code{std} 取标准差；0 为单次确定性输出 \\[0.16cm]
+    \code{std_threshold=0.2} & \code{std} 超过 0.2 的判为 K \\[0.16cm]
+    \code{rm_unknwon=True} & 生成 SKHASH 输入前剔除 K \\[0.16cm]
+    \code{change2taup=True} & 用 TauP 理论到时替换到时，原值存 \code{ptime0/stime0} \\[0.16cm]
+    \code{add_sta=True} & 给有波形、无拾取的台站补理论到时；必须配合 \code{change2taup=True} \\[0.16cm]
+    \code{keep_initial_phase} & 已有拾取时保留原值（example2 用 True） \\
+  \end{tabularx}
+  \note{Sources: example/hyperparams.py comments and run\_RPNet.py threshold logic (std $>$ std\_threshold $\to$ 'K'; rm\_unknwon drops 'K' before prep\_skhash). est\_taup keeps ptime0/stime0 columns. add_sta rows have NaN picks, so change2taup must fill them, as the hyperparams comment states.}
+\end{frame}
+
+\begin{frame}[t,fragile]{SKHASH 模板 control\_file0.txt}
+  除前页两处外，必改第三处——速度模型路径：
+  \begin{Code}
+$vmodel_paths
+/home/your/RPNet-work/example/vz.iasp91
+  \end{Code}
+  \begin{tabularx}{\linewidth}{@{}L{5.6cm}L{2.6cm}X@{}}
+    \textbf{参数} & \textbf{本例值} & \textbf{含义} \\[0.10cm]
+    \code{npolmin} & 8 & 少于 8 条极性的事件不反演 \\[0.10cm]
+    \code{dang} & 5 & 网格角步长（度）；模板原值 1 \\[0.10cm]
+    \code{delmax} & 120 km & 震中距上限，超出极性被丢弃 \\[0.10cm]
+    \code{num_cpus} & 2 & 并行核数 \\[0.10cm]
+    \code{use_fortran} & False & 内置 Python 例程；模板原值 True \\
+  \end{tabularx}
+  \gap
+  example 自带 \code{vz.iasp91}（深度 km、Vp 两列）；example2 从 example 拷一份，换区时用本区模型。
+  \note{Sources: example/control\_file0.txt (author path /home/jwhan/vz.iasp91) and vz.iasp91 header. Template defaults are dang=1 and use\_fortran=True; this deck's values (5 / False) follow the grid-spacing page. nmc=30 (Monte Carlo trials) and badfrac=0.05 (assumed bad polarity fraction) are further template values left unchanged. RPNet copies this template into the generated control file at runtime, so edit it before running run\_RPNet.py.}
+\end{frame}
+
+\begin{frame}[t,fragile]{运行 example1}
+  \begin{Shell}
+conda activate rpnet
+cd "$RPNET_ROOT/example"
+python run_RPNet.py
+  \end{Shell}
+  屏幕依次显示：TauP (P) $\to$ TauP (S) $\to$ Make input matrix $\to$ Predict polarity $\to$ ALL DONE。
+  \gap
+  实测（WSL2、5 核、CPU）：全程约 0.3 分钟。
+  \gap
+  脚本开头会删除并重建 \code{output01/}——需要保留的结果先复制到别处。
+  \gap
+  \code{run_RPNet.ipynb} 是同一流程的分步版本，便于逐段查看中间表。
+  \note{Verified run: 18 s wall clock, exit 0, ALL DONE printed. The rmtree(out\_dir) at the script head deletes the previous output tree, including the author's shipped output01 in a fresh copy.}
+\end{frame}
+
+\begin{frame}[t]{RPNet 输出文件（output01/）}
+  \begin{tabularx}{\linewidth}{@{}L{9.2cm}X@{}}
+    \textbf{文件或子目录} & \textbf{内容} \\[0.26cm]
+    \code{pol_result.csv} & 全部预测：\code{predict}（U/D/K）、\code{prob}、\code{std} 与 TauP 前后到时 \\[0.26cm]
+    \code{MSEED/<id>/<sta>.mseed} & 切窗存档（P$\pm$2.5 s、高通 1 Hz、100 Hz） \\[0.26cm]
+    \code{hash2/uniq_pol.csv} & 筛选（去 K、去重台站）后的极性表 \\[0.26cm]
+    \code{hash2/IN/station.txt、phase.txt} & HASH 格式台站与震相文件 \\[0.26cm]
+    \code{hash2/control_file.txt} & 路径已指向 output01，可直接交给 SKHASH \\
+  \end{tabularx}
+  \gap
+  example1 特有一步：台站统一改名 S001…S0xx、\code{net=HI}、\code{chan=HHZ}，\par
+  是 Hi-net 的整理（Renaming 段，仅为格式一致），换台网时按需改写。
+  \note{Sources: rpnet2skhash.py prep\_skhash outputs and run\_RPNet.py lines 128--131 renaming block. pol\_result.csv keeps ptime0/stime0 (pre-TauP picks). uniq\_pol.csv is written after drop\_duplicates and rm_unknwon filtering.}
+\end{frame}
+
+\begin{frame}[t,fragile]{运行 SKHASH 与结果核对}
+  在 example 目录内运行（控制文件里是相对路径）：
+  \cmd{SKHASH output01/hash2/control_file.txt}
+  实测（5 度、纯 Python）2.5 秒；屏幕先提示丢弃震中距超过 120 km 的极性。
+  \gap
+  结果在 \code{output01/hash2/OUT/}：\code{out.csv}（strike、dip、rake、quality）、\code{out2.csv} 与 \code{figure/}。
+  \gap
+  \begin{tabularx}{\linewidth}{@{}L{3.6cm}XXX@{}}
+    \textbf{事件} & \textbf{本次（5 度）} & \textbf{作者随包（1 度）} & \textbf{目录参考} \\[0.16cm]
+    M4.4 & 265.4 / 41.4 / -88.2 & 265.0 / 39.8 / -89.2 & 267 / 35 / -91 \\[0.16cm]
+    M4.0 & 22.7 / 73.0 / -179.2 & 22.9 / 72.2 / -178.6 & 20 / 69 / 172 \\
+  \end{tabularx}
+  \gap
+  5 度与作者 1 度结果相差 1--2 度；目录参考是另一套机构解，量级相符。
+  \note{Verified at dang=5 with the Python routine: both events solved in 2.5 s total, peak RSS about 1.0 GB. Solutions differ from the author's dang=1 shipped output (265.0/39.8/-89.2 and 22.9/72.2/-178.6) by 1--2 degrees; the 1-degree Fortran route reproduced the shipped values exactly. Catalog reference columns strike/dip/slip from Kumamoto\_catalog.csv. SKHASH discarded 18--19 of 98 polarities beyond delmax=120 km.}
+\end{frame}
+
+\begin{frame}[t,fragile]{example2：S/P 振幅比（hash3）}
+  数据：2024 年韩国 Buan M4.8 与 M3.1，三分量波形（HGE / HGN / HGZ）。
+  \gap
+  与 example1 的 \code{hyperparams.py} 差异：
+  \begin{Code}
+hash_version='hash3'; std_threshold=0.02; mean_threshold=0.95
+keep_initial_phase=True; fwfid='pick'; ftime='utc'
+sp_freq=(1,20)
+sp_win=[-2.5,-0.5,-0.5,+1.0,-0.5,+2.5]
+  \end{Code}
+  \code{sp_win} 六个数依次为噪声窗、P 窗（相对 P 到时）、S 窗（相对 S 到时）的起止秒；S/P 比写入 \code{hash3/IN/amp.txt}。
+  运行前同样先改 \code{control_file0.txt} 的 \code{vmodel_paths}（文本模型从 example 拷入）。
+  \gap
+  实测（5 度）：RPNet 约 1.2 分钟，SKHASH 约 24 秒；机制解与作者 1 度随包相差几度\par
+  （M4.8 事件本次 33.6/86.2/173.3，作者随包 33.7/87.9/174.8）。
+  \note{Verified end-to-end at dang=5 (Python routine). Window semantics from rpnet2skhash.py preprocess/calc\_amplitude (noise and P windows relative to P arrival, S window relative to S arrival; bandpass sp\_freq; amplitudes are max-min per window, vector-summed over components). example2 keeps original station codes (no renaming block). The dang=1 Fortran route gave 33.6/88.0/174.1, within a few degrees of the shipped 33.7/87.9/174.8.}
+\end{frame}
+
+\begin{frame}[t]{换成本区数据}
+  \begin{tabularx}{\linewidth}{@{}L{5.2cm}X@{}}
+    \textbf{项目} & \textbf{做法} \\[0.24cm]
+    三个 CSV & 保留同名列即可；列名不同就改 \code{ftime/fwfid/fptime/fstime} \\[0.24cm]
+    波形目录 & 按 \code{wf_dir/<fwfid>/<sta>.*} 组织，垂直通道 *Z 优先 \\[0.24cm]
+    台站改名段 & example1 的 Renaming 段是 Hi-net 专用；自有台网保留原名或改短名（HASH 震相行台站列宽有限，建议不超过 4 字符） \\[0.24cm]
+    速度模型 & \code{vmodel_paths} 换本区一维模型：深度 km、Vp 两列文本 \\[0.24cm]
+    TauP 模型 & \code{taup_model} 可换 \code{'ak135'}，或填自定 npz 绝对路径（example2 附 \code{srkim_iasp.npz} 示例） \\[0.24cm]
+    时间标准 & 目录与震相同一标准即可，用 UTC 最省事 \\
+  \end{tabularx}
+  \note{Sources: hyperparams.py taup\_model comment (custom npz path), rpnet2skhash.py station/phase writers (ljust field widths), example2 data layout. This is an adaptation checklist, not a tested migration to a new region.}
+\end{frame}
+
+\begin{frame}[t]{注意事项与已知坑}
+  \lineitem{输出目录被清空}{每次运行先 \code{rmtree(out_dir)}，旧结果不留底。}
+  \gap
+  \lineitem{example1 的笔误}{\code{mean_threshold} 非 0 时会 \code{NameError}（脚本里拼成 \code{mean_thresuld}）；要启用就照 example2 的写法改这一行。}
+  \gap
+  \lineitem{TauP 无容错}{某台站—事件对算不出理论到时会直接报错停住，先从表里清掉这类组合。}
+  \gap
+  \lineitem{并行吞错}{SKHASH 的 \code{num_cpus>1} 不显示 worker 报错；\code{out.csv} 为空时改回单核重跑，看真实错误。}
+  \gap
+  \lineitem{结果涨落}{迭代预测带随机性：极性表可能差一两条，机制解在小数位上浮动。}
+  \gap
+  \lineitem{1 度路线}{要走作者的 \code{dang 1} 需按可选页编译 Fortran 并扩 \code{ncoor}；未编译而设 \code{use_fortran=True} 会交互提问。}
+  \note{Sources: run\_RPNet.py mean\_thresuld typo (example1 line 145; example2 uses the corrected .loc form), est\_taup has no try/except, SKHASH.py parallel branch only consumes worker results when pol\_agree/sp\_agree/pol\_info outputs are requested, and gridsearch\_so.create prompts interactively. All observed in source or during the verified runs.}
+\end{frame}
+
+\begin{frame}[t]{遇到错误时先查什么}
+  \begin{tabularx}{\linewidth}{@{}L{8.8cm}X@{}}
+    \textbf{现象} & \textbf{处理办法} \\[0.26cm]
+    导入失败 & 激活 rpnet 环境；确认 \code{rpnet}、\code{skhash} 装在同一环境 \\[0.26cm]
+    \code{Can not find model file} & \code{model} 路径相对 example 目录；从别处运行要改成绝对路径 \\[0.26cm]
+    \code{out.csv} 只有表头 & \code{num_cpus} 改 1 重跑看报错（并行不显示 worker 错误） \\[0.26cm]
+    分配 34 GiB 失败 & 1 度网格走了 Python 回退：改 \code{dang 5}，或编译 Fortran 例程 \\[0.26cm]
+    \code{rotations too big} & 1 度路线的 \code{ncoor} 容量不足：改大后重新编译 \\[0.26cm]
+    TauP 阶段停住 & 清理算不出理论到时的台站—事件对 \\[0.26cm]
+    极性几乎全 K & \code{std_threshold} 太严或波形质量差；先看 \code{pol_result.csv} 的 \code{prob/std} 分布 \\
+  \end{tabularx}
+  \note{Failure checklist assembled from the verified failure modes (Python fallback memory error, silent parallel failure, missing-module prompt) and the script's own guards. Error strings quoted from predict.py and gridsearch.f output.}
+\end{frame}
+
+\begin{frame}[t]{每一步的结果交给哪个程序}
+  \begin{tabularx}{\linewidth}{@{}L{6.0cm}L{12.0cm}X@{}}
+    \textbf{步骤} & \textbf{输出} & \textbf{后续} \\[0.28cm]
+    数据准备 & 目录＋震相＋台站 CSV＋波形目录 & \code{run_RPNet.py} \\[0.28cm]
+    到时整理 & TauP 到时表（\code{ptime/stime}） & 切窗与预测 \\[0.28cm]
+    极性预测 & \code{pol_result.csv}（含 \code{prob/std}） & 人工核对 / SKHASH \\[0.28cm]
+    筛选与转换 & \code{hash2} 或 \code{hash3} 输入＋控制文件 & SKHASH \\[0.28cm]
+    SKHASH & \code{OUT/out.csv}（走向、倾角、滑动角） & 结果分析 \\
+  \end{tabularx}
+  \gap
+  先把两个示例完整跑通，再把同样的改动套到本区数据上。
+  \note{Workflow map of the verified chain. The example1 reference outputs shipped in the repository let users compare intermediate and final products at every stage.}
+\end{frame}
+
+\end{document}
