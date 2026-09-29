@@ -9,15 +9,32 @@ RPNet（P 波初动极性判定，Han et al., 2025, SRL）的命令行封装。
 
 ## 安装
 
+Python 必须是 3.9：上游 rpnet 依赖的是 2021 年的版本组合（TensorFlow 2.7、
+numpy 1.19.5 等），官方只为 Python 3.9 发布过现成安装包；实测 3.10 及以上
+（含 3.14）pip 会转源码编译并直接失败。
+
+务必先建独立环境装好 rpnet，再做其他操作：rpnet 锁定 TensorFlow 2.7、
+numpy 1.19.5 等 2021 年版本，混装进已有环境会把原有包整体降级。
+
 ```sh
-conda create -n rpnet python=3.9 -y
+conda create -n rpnet python=3.9 -y     # 注意显式写 python=3.9
 conda activate rpnet
-pip install rpnet              # 上游包（TensorFlow 2.7 等依赖一并安装）
+python --version                        # 必须显示 3.9.x，否则后面全报错
+
+# 第一步：上游包（TensorFlow 2.7 等依赖一并安装，约 0.5 GB）
+pip install rpnet
+python -c "import rpnet; print('rpnet OK')"    # 装好先自检
+
+# 第二步：其余两个包
 pip install skhash             # SKHASH 1.1.5，与上同环境
 pip install git+https://github.com/suxieglitter/rpnet-run.git
+rpnet-run --version
 ```
 
-离线服务器部署见 [MIGRATE.md](MIGRATE.md)（自制离线包 + 全流程验证数字）。
+离线服务器部署见 [MIGRATE.md](MIGRATE.md)（自制离线包 + 全流程验证数字）；
+现成的离线迁移包（1.2 GB，含全部 wheel 与模型权重）在
+[Releases](https://github.com/suxieglitter/rpnet-run/releases/tag/v0.1.0) 下载，
+内网或镜像不全的机器用它，一条命令离线装齐。
 模型权重 `RPNet_v1.h5` 从[上游仓库](https://github.com/jongwon-han/RPNet)的
 `model/` 目录获取（约 62 MB）。
 
