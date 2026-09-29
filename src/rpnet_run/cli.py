@@ -85,6 +85,12 @@ def main(argv=None):
     sk.add_argument("--use-fortran", action="store_true",
                     help="use the compiled SKHASH Fortran routine "
                          "(only if you built gridsearch.so)")
+    sk.add_argument("--loc-uncert", type=float, default=0.0, metavar="KM",
+                    help="uniform source location uncertainty (km) written "
+                         "into the SKHASH phase file, so the Monte Carlo "
+                         "trials actually perturb locations and "
+                         "fault_plane_uncertainty includes location error "
+                         "(0 = off, default)")
 
     parser.add_argument("--version", action="version",
                         version="%(prog)s " + __version__)

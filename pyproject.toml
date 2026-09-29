@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rpnet-run"
-version = "0.1.0"
+version = "0.1.1"
 description = "One-command CLI wrapper for RPNet P-wave polarity prediction with SKHASH input generation"
 readme = "README.md"
 requires-python = ">=3.9"

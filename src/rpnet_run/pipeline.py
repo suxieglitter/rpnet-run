@@ -1,13 +1,20 @@
 """Pipeline for rpnet-run.
 
 Faithful port of the upstream example/run_RPNet.py workflow (RPNet v0.1.0),
-with three deliberate differences:
+with four deliberate differences:
 
 1. Parameters come from the caller instead of hyperparams.py.
 2. mean_threshold filtering uses the corrected logic from example2
    (upstream example1 has a mean_thresuld NameError typo).
 3. The SKHASH control template is generated here (vmodel path, dang,
    use_fortran ...), so no hand-edited control_file0.txt is needed.
+4. loc_uncert (km) turns on source-location perturbation in the SKHASH
+   Monte Carlo trials with one uniform uncertainty. Upstream hardcodes
+   0.00 km location uncertainties into the phase file, which makes the
+   nmc trials geometrically identical; the value is written back into
+   the phase file header because SKHASH's default_uncert fill only
+   covers missing/negative columns, not the explicit zeros that
+   hash2-format files carry.
 
 Path handling goes through rpnet_run.paths (normalize, reject parent
 references, allowlist containment); this module never opens files for
@@ -78,6 +85,9 @@ $num_cpus      # number of cores in parallel (0: use all cpu / 1: sigle core)
 
 $use_fortran   # Fortran subroutine for fast grid search
 {use_fortran}
+
+$perturb_epicentral_location  # randomly perturb the horizontal earthquake location
+{perturb_epicentral}
 """
 
 
@@ -110,6 +120,7 @@ def run(
     delmax=120,
     num_cpus=2,
     use_fortran=False,
+    loc_uncert=0.0,
     overwrite=False,
 ):
     os.environ["CUDA_VISIBLE_DEVICES"] = gpu
@@ -131,6 +142,11 @@ def run(
     if add_sta and not change2taup:
         raise SystemExit("[rpnet-run] --add-sta needs TauP times "
                          "(--no-taup must not be set)")
+    if loc_uncert < 0:
+        raise SystemExit("[rpnet-run] --loc-uncert must be >= 0 km")
+    if loc_uncert >= 100:
+        raise SystemExit("[rpnet-run] --loc-uncert must be < 100 km "
+                         "(fixed-width phase file columns)")
 
     if os.path.exists(out_dir):
         if not overwrite:
@@ -298,7 +314,11 @@ def run(
     ctrl_text = CONTROL_TEMPLATE.format(
         vmodel=vmodel, npolmin=npolmin, dang=dang,
         delmax=delmax, num_cpus=num_cpus,
-        use_fortran=str(bool(use_fortran)))
+        use_fortran=str(bool(use_fortran)),
+        perturb_epicentral=str(bool(loc_uncert > 0)))
+    if loc_uncert > 0:
+        print("- location perturbation ON: uniform %.2f km for all events "
+              "(SKHASH Monte Carlo trials)" % loc_uncert)
     np.savetxt(join_out(out_dir, "control_file0.txt"),
                np.array(ctrl_text.splitlines()), fmt="%s")
     r_df = r_df.drop_duplicates(["sta", id_col]).reset_index(drop=True)
@@ -307,6 +327,23 @@ def run(
                 ftime=time_col, fwfid=id_col,
                 ctrl0=join_out(out_dir, "control_file0.txt"),
                 out_dir=out_dir, hash_version=hash_version)
+
+    # ---- write location uncertainty into the phase file headers ---------
+    # prep_skhash hardcodes ' 0.00 0.00' (horz/vert km) at columns 88-99 of
+    # each event header; SKHASH perturbs locations by exactly those values.
+    if loc_uncert > 0:
+        phase_path = os.path.join(out_dir, hash_version, "IN", "phase.txt")
+        pair = "%5.2f %5.2f" % (loc_uncert, loc_uncert)
+        with open(phase_path) as f:
+            lines = f.read().splitlines()
+        n_hdr = 0
+        for i, line in enumerate(lines):
+            if len(line) > 100:  # event headers; pick/footer lines are short
+                lines[i] = line[:88] + pair + line[99:]
+                n_hdr += 1
+        np.savetxt(phase_path, np.array(lines), fmt="%s")
+        print("- %d event headers: location uncertainty %.2f km written "
+              "into phase.txt" % (n_hdr, loc_uncert))
 
     print("@ DONE in %.1f min: %s/pol_result.csv, %s/%s/ "
           "(run: SKHASH %s/%s/control_file.txt)"

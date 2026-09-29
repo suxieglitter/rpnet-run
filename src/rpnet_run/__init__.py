@@ -5,4 +5,4 @@ github.com/jongwon-han/RPNet) so users do not have to edit
 example/hyperparams.py and copy example directories around.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
